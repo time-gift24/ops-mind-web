@@ -89,30 +89,38 @@ export default function SopCheckNew() {
     )
     esRef.current = es
 
-    let currentAssistantId: string | null = null
+    const assistantId = { current: null as string | null }
 
     es.addEventListener("message", (ev) => {
       let payload: { type?: string; role?: string; text?: string; delta?: string } = {}
       try {
         payload = JSON.parse(ev.data)
       } catch {
-        payload = { type: "text-delta", delta: ev.data }
+        payload = { delta: ev.data }
       }
 
-      const role = (payload.role === "user" ? "user" : "assistant") as
-        | "user"
-        | "assistant"
+      const role: "user" | "assistant" =
+        payload.role === "user" ? "user" : "assistant"
       const chunk = payload.delta ?? payload.text ?? ""
+      if (!chunk) return
+
+      // Decide id outside the updater so React's potential double-invocation
+      // in dev never produces inconsistent state from a closure mutation.
+      let id = role === "assistant" ? assistantId.current : null
+      if (!id) {
+        id = crypto.randomUUID()
+        if (role === "assistant") assistantId.current = id
+      }
+      const targetId = id
 
       setMessages((prev) => {
-        if (role === "assistant" && currentAssistantId) {
-          return prev.map((m) =>
-            m.id === currentAssistantId ? { ...m, text: m.text + chunk } : m,
-          )
+        const idx = prev.findIndex((m) => m.id === targetId)
+        if (idx >= 0) {
+          const next = prev.slice()
+          next[idx] = { ...next[idx], text: next[idx].text + chunk }
+          return next
         }
-        const id = crypto.randomUUID()
-        if (role === "assistant") currentAssistantId = id
-        return [...prev, { id, role, text: chunk }]
+        return [...prev, { id: targetId, role, text: chunk }]
       })
     })
 
@@ -122,8 +130,11 @@ export default function SopCheckNew() {
     })
 
     es.addEventListener("error", () => {
+      // EventSource fires "error" when the server closes the stream after
+      // sending "done"; ignore unless we never reached the done state.
+      if (es.readyState === EventSource.CLOSED) return
       setStatus((s) => (s === "done" ? s : "error"))
-      setError("流连接中断")
+      setError((e) => e ?? "流连接中断")
       closeStream()
     })
   }, [closeStream])
