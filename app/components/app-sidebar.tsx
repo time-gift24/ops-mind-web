@@ -3,10 +3,14 @@ import {
   CheckCircle2Icon,
   ChevronRightIcon,
   HistoryIcon,
+  MoonIcon,
   PlayCircleIcon,
   SettingsIcon,
+  SunIcon,
   XCircleIcon,
 } from "lucide-react"
+import { useTheme } from "next-themes"
+import { useEffect, useState } from "react"
 import { Link, useLocation } from "react-router"
 
 import {
@@ -156,6 +160,9 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
+            <ModeToggle />
+          </SidebarMenuItem>
+          <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="设置">
               <Link to="/settings">
                 <SettingsIcon />
@@ -168,5 +175,26 @@ export function AppSidebar() {
 
       <SidebarRail />
     </Sidebar>
+  )
+}
+
+function ModeToggle() {
+  const { resolvedTheme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const isDark = mounted && resolvedTheme === "dark"
+  const label = mounted ? (isDark ? "切换到浅色" : "切换到深色") : "切换主题"
+  const Icon = isDark ? SunIcon : MoonIcon
+
+  return (
+    <SidebarMenuButton
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      tooltip={label}
+      aria-label={label}
+    >
+      <Icon />
+      <span>{label}</span>
+    </SidebarMenuButton>
   )
 }
