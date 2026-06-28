@@ -1,13 +1,19 @@
 import {
-  LayoutDashboardIcon,
-  MessagesSquareIcon,
-  ScrollTextIcon,
-  ServerIcon,
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  ChevronRightIcon,
+  HistoryIcon,
+  PlayCircleIcon,
   SettingsIcon,
-  TerminalIcon,
+  XCircleIcon,
 } from "lucide-react"
 import { Link, useLocation } from "react-router"
 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "~/components/ui/collapsible"
 import {
   Sidebar,
   SidebarContent,
@@ -23,15 +29,23 @@ import {
   SidebarTrigger,
 } from "~/components/ui/sidebar"
 
-const overview = [
-  { title: "仪表盘", to: "/", icon: LayoutDashboardIcon },
-  { title: "会话", to: "/conversations", icon: MessagesSquareIcon },
-]
+const statusIcon = {
+  pass: { icon: CheckCircle2Icon, className: "text-emerald-500" },
+  warn: { icon: AlertTriangleIcon, className: "text-amber-500" },
+  fail: { icon: XCircleIcon, className: "text-red-500" },
+} as const
 
-const operations = [
-  { title: "服务器", to: "/servers", icon: ServerIcon },
-  { title: "日志", to: "/logs", icon: ScrollTextIcon },
-  { title: "运维手册", to: "/runbooks", icon: TerminalIcon },
+const history: Array<{
+  id: string
+  title: string
+  at: string
+  status: keyof typeof statusIcon
+}> = [
+  { id: "c-2406-281432", title: "数据库主从延迟", at: "06-28 14:32", status: "warn" },
+  { id: "c-2406-281015", title: "缓存集群健康", at: "06-28 10:15", status: "pass" },
+  { id: "c-2406-272253", title: "网关 5xx 飙升", at: "06-27 22:53", status: "fail" },
+  { id: "c-2406-271842", title: "日志采集巡检", at: "06-27 18:42", status: "pass" },
+  { id: "c-2406-270900", title: "K8s 节点资源", at: "06-27 09:00", status: "pass" },
 ]
 
 export function AppSidebar() {
@@ -79,48 +93,64 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>概览</SidebarGroupLabel>
+          <SidebarGroupLabel>SOP 质检</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {overview.map((item) => (
-                <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === item.to}
-                    tooltip={item.title}
-                  >
-                    <Link to={item.to}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  tooltip="发起 SOP 质检"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary active:text-primary-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
+                >
+                  <Link to="/sop-checks/new">
+                    <PlayCircleIcon />
+                    <span>发起 SOP 质检</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>运维</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {operations.map((item) => (
-                <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === item.to}
-                    tooltip={item.title}
-                  >
-                    <Link to={item.to}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <Collapsible defaultOpen className="group/history">
+          <SidebarGroup>
+            <SidebarGroupLabel asChild>
+              <CollapsibleTrigger className="flex w-full items-center gap-2">
+                <HistoryIcon className="size-4" />
+                <span>质检历史</span>
+                <ChevronRightIcon className="ml-auto size-4 transition-transform group-data-[state=open]/history:rotate-90" />
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {history.map((item) => {
+                    const Status = statusIcon[item.status]
+                    return (
+                      <SidebarMenuItem key={item.id}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={pathname === `/sop-checks/${item.id}`}
+                          tooltip={`${item.at} · ${item.title}`}
+                        >
+                          <Link to={`/sop-checks/${item.id}`}>
+                            <Status.icon className={Status.className} />
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                              <span className="truncate">{item.title}</span>
+                              <span className="text-muted-foreground shrink-0 text-[10px]">
+                                {item.at}
+                              </span>
+                            </span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
       </SidebarContent>
 
       <SidebarFooter>
