@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1.0" name="viewport"/>
+<title>Ops Mind - Neural Core v5 (Elongated Diamond)</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+  </style>
+</head>
+<body style="width: 100%; height: 100%; overflow: hidden; background: #F8FAFC;">
+<div class="fixed inset-0 w-full h-full flex items-center justify-center" id="animated-svg-CONTAINER">
+<svg class="w-[80vh] h-[80vh]" viewbox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<lineargradient id="opsGradient" x1="0%" x2="100%" y1="0%" y2="100%"><stop offset="0%" style="stop-color:#0072ff;stop-opacity:1"></stop><stop offset="100%" style="stop-color:#1e40af;stop-opacity:1"></stop></lineargradient>
+<lineargradient id="geminiGradient" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#00f0ff;stop-opacity:1"></stop>
+<stop offset="50%" style="stop-color:#0072ff;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#b06ab3;stop-opacity:1"></stop>
+</lineargradient>
+<filter height="200%" id="opsGlow" width="200%" x="-50%" y="-50%">
+<fegaussianblur result="blur" stddeviation="4"></fegaussianblur>
+<fecomposite in="SourceGraphic" in2="blur" operator="over"></fecomposite>
+</filter>
+</defs>
+<!-- Outer Hexagonal Compliance Frame -->
+<path d="M120 20 L206.6 70 L206.6 170 L120 220 L33.4 170 L33.4 70 Z" fill="none" opacity="0.15" stroke="url(#opsGradient)" stroke-dasharray="10 5" stroke-width="2"></path>
+<!-- Rotating Radar Rings -->
+<circle cx="120" cy="120" fill="none" opacity="0.08" r="95" stroke="url(#opsGradient)" stroke-width="1">
+<animatetransform attributename="transform" dur="20s" from="0 120 120" repeatcount="indefinite" to="360 120 120" type="rotate"></animatetransform>
+</circle>
+<!-- Neural Mesh Core -->
+<g filter="url(#opsGlow)" transform="translate(120, 120)">
+<g id="mesh-rotator">
+<!-- 6 Intertwined Arcs/Circles forming the 'Iris' -->
+<g opacity="0.7">
+<path d="M0 -40 A40 40 0 1 1 34.6 -20" fill="none" stroke="url(#opsGradient)" stroke-linecap="round" stroke-width="6">
+<animatetransform attributename="transform" dur="10s" repeatcount="indefinite" type="rotate" values="0;360"></animatetransform>
+</path>
+<path d="M0 -40 A40 40 0 1 1 34.6 -20" fill="none" stroke="url(#opsGradient)" stroke-linecap="round" stroke-width="6" transform="rotate(60)">
+<animatetransform attributename="transform" dur="10s" repeatcount="indefinite" type="rotate" values="60;420"></animatetransform>
+</path>
+<path d="M0 -40 A40 40 0 1 1 34.6 -20" fill="none" stroke="url(#opsGradient)" stroke-linecap="round" stroke-width="6" transform="rotate(120)">
+<animatetransform attributename="transform" dur="10s" repeatcount="indefinite" type="rotate" values="120;480"></animatetransform>
+</path>
+<path d="M0 -40 A40 40 0 1 1 34.6 -20" fill="none" stroke="url(#opsGradient)" stroke-linecap="round" stroke-width="6" transform="rotate(180)">
+<animatetransform attributename="transform" dur="10s" repeatcount="indefinite" type="rotate" values="180;540"></animatetransform>
+</path>
+<path d="M0 -40 A40 40 0 1 1 34.6 -20" fill="none" stroke="url(#opsGradient)" stroke-linecap="round" stroke-width="6" transform="rotate(240)">
+<animatetransform attributename="transform" dur="10s" repeatcount="indefinite" type="rotate" values="240;600"></animatetransform>
+</path>
+<path d="M0 -40 A40 40 0 1 1 34.6 -20" fill="none" stroke="url(#opsGradient)" stroke-linecap="round" stroke-width="6" transform="rotate(300)">
+<animatetransform attributename="transform" dur="10s" repeatcount="indefinite" type="rotate" values="300;660"></animatetransform>
+</path>
+</g>
+<animatetransform attributename="transform" dur="30s" from="0 0 0" repeatcount="indefinite" to="-360 0 0" type="rotate"></animatetransform>
+</g>
+<!-- Central "Intelligence" Dot - Elongated diamond reduced by 20% with multi-color gradient -->
+<path d="M 0 -24 L 12 0 L 0 24 L -12 0 Z" fill="url(#geminiGradient)">
+<animate attributename="transform" dur="2s" repeatcount="indefinite" type="scale" values="0.8;1.2;0.8"></animate>
+<animate attributename="opacity" dur="2s" repeatcount="indefinite" values="0.8;1;0.8"></animate>
+</path>
+<!-- Horizontal Scanning Line -->
+<line opacity="0.5" stroke="white" stroke-width="1" x1="-30" x2="30" y1="0" y2="0">
+<animate attributename="y1" dur="3s" repeatcount="indefinite" values="-15;15;-15"></animate>
+<animate attributename="y2" dur="3s" repeatcount="indefinite" values="-15;15;-15"></animate>
+<animate attributename="opacity" dur="3s" repeatcount="indefinite" values="0;0.6;0"></animate>
+</line>
+</g>
+<!-- Scanning HUD Elements -->
+<g fill="none" opacity="0.2" stroke="url(#opsGradient)" stroke-width="1.5">
+<path d="M120 40 A80 80 0 0 1 200 120" stroke-dasharray="4 4"></path>
+<path d="M120 200 A80 80 0 0 1 40 120" stroke-dasharray="4 4"></path>
+<animatetransform attributename="transform" dur="12s" from="0 120 120" repeatcount="indefinite" to="360 120 120" type="rotate"></animatetransform>
+</g>
+</svg>
+</div>
+</body></html>
