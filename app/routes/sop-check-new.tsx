@@ -1,5 +1,10 @@
 import { AnimatePresence, motion } from "motion/react"
-import { LoaderIcon, PlayCircleIcon, RotateCcwIcon } from "lucide-react"
+import {
+  GlobeIcon,
+  LoaderIcon,
+  PlayCircleIcon,
+  RotateCcwIcon,
+} from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
@@ -12,6 +17,22 @@ import {
   MessageContent,
   MessageResponse,
 } from "~/components/ai-elements/message"
+import {
+  PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionAddScreenshot,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
+  PromptInputBody,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputProvider,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "~/components/ai-elements/prompt-input"
+import { Badge } from "~/components/ui/badge"
 import { Button } from "~/components/ui/button"
 import { Input } from "~/components/ui/input"
 import {
@@ -36,10 +57,10 @@ async function dispatchSopCheck(input: {
   env: Env
   sopId: string
 }): Promise<{ thread_id: string }> {
-  const res = await fetch("/api/sop-checks", {
+  const res = await fetch("/v1/apis/sop", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ env: input.env, sop_id: input.sopId }),
   })
   if (!res.ok) throw new Error(`下发失败: HTTP ${res.status}`)
   return res.json()
@@ -64,7 +85,7 @@ export default function SopCheckNew() {
   const openStream = useCallback((tid: string) => {
     closeStream()
     const es = new EventSource(
-      `/api/threads/${encodeURIComponent(tid)}/stream`,
+      `/v1/apis/sse/${encodeURIComponent(tid)}`,
     )
     esRef.current = es
 
@@ -150,30 +171,14 @@ export default function SopCheckNew() {
         {inChat ? (
           <motion.div
             key="chat"
-            className="flex flex-1 flex-col gap-2"
+            className="relative flex flex-1 flex-col"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
           >
-            <motion.div
-              className="mx-auto w-full max-w-3xl"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, delay: 0.1, ease: "easeOut" }}
-            >
-              <DispatchedHeader
-                env={env}
-                sopId={sopId}
-                status={status}
-                threadId={threadId}
-                error={error}
-                onRestart={handleRestart}
-              />
-            </motion.div>
-
             <Conversation>
-              <ConversationContent className="mx-auto w-full max-w-3xl pb-32">
+              <ConversationContent className="mx-auto w-full max-w-3xl px-4 pt-20 pb-44">
                 {messages.map((m, i) => (
                   <motion.div
                     key={m.id}
@@ -202,22 +207,68 @@ export default function SopCheckNew() {
                   <div className="text-destructive text-sm">{error}</div>
                 ) : null}
               </ConversationContent>
-              <ConversationScrollButton />
+              <ConversationScrollButton className="bottom-32" />
             </Conversation>
 
             <motion.div
-              className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 pb-6"
+              className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center px-4 pt-4"
+              initial={{ opacity: 0, y: -12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: 0.1, ease: "easeOut" }}
+            >
+              <div className="pointer-events-auto bg-background/80 supports-[backdrop-filter]:bg-background/60 w-full max-w-3xl rounded-full border px-4 py-2 shadow-sm backdrop-blur-xl">
+                <DispatchedHeader
+                  env={env}
+                  sopId={sopId}
+                  status={status}
+                  threadId={threadId}
+                  error={error}
+                  onRestart={handleRestart}
+                />
+              </div>
+            </motion.div>
+
+            <motion.div
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center px-4 pb-4"
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.25, ease: "easeOut" }}
             >
-              <div className="pointer-events-auto bg-background/80 supports-[backdrop-filter]:bg-background/60 w-full max-w-3xl rounded-full border px-2 py-2 shadow-sm backdrop-blur-xl">
-                <div className="text-muted-foreground flex items-center gap-3 px-3 py-1 text-xs">
-                  <span className="font-mono">
-                    thread · {threadId.slice(0, 8)}
-                  </span>
-                  <span className="ml-auto">追问能力待接入</span>
-                </div>
+              <div className="pointer-events-auto w-full max-w-3xl">
+                <PromptInputProvider>
+                  <PromptInput
+                    onSubmit={() => {
+                      /* 追问能力尚未开放 */
+                    }}
+                  >
+                    <PromptInputBody>
+                      <PromptInputTextarea
+                        placeholder="追问能力尚未开放"
+                        disabled
+                        aria-disabled
+                      />
+                    </PromptInputBody>
+                    <PromptInputFooter>
+                      <PromptInputTools>
+                        <PromptInputActionMenu>
+                          <PromptInputActionMenuTrigger disabled />
+                          <PromptInputActionMenuContent>
+                            <PromptInputActionAddAttachments />
+                            <PromptInputActionAddScreenshot />
+                          </PromptInputActionMenuContent>
+                        </PromptInputActionMenu>
+                        <PromptInputButton disabled>
+                          <GlobeIcon size={16} />
+                          <span>搜索</span>
+                        </PromptInputButton>
+                        <Badge variant="secondary" className="ml-1">
+                          尚未开放
+                        </Badge>
+                      </PromptInputTools>
+                      <PromptInputSubmit disabled />
+                    </PromptInputFooter>
+                  </PromptInput>
+                </PromptInputProvider>
               </div>
             </motion.div>
           </motion.div>

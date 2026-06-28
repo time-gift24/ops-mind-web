@@ -25,6 +25,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
   SidebarTrigger,
 } from "~/components/ui/sidebar"
@@ -95,7 +98,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupLabel>SOP 质检</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1.5">
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
@@ -108,49 +111,46 @@ export function AppSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+
+              <Collapsible defaultOpen asChild className="group/history">
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton tooltip="质检历史">
+                      <HistoryIcon />
+                      <span>质检历史</span>
+                      <ChevronRightIcon className="ml-auto size-4 transition-transform group-data-[state=open]/history:rotate-90" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub className="mt-1 gap-1.5">
+                      {history.map((item) => {
+                        const Status = statusIcon[item.status]
+                        return (
+                          <SidebarMenuSubItem key={item.id}>
+                            <SidebarMenuSubButton
+                              asChild
+                              isActive={pathname === `/sop-checks/${item.id}`}
+                            >
+                              <Link to={`/sop-checks/${item.id}`}>
+                                <Status.icon className={Status.className} />
+                                <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                  <span className="truncate">{item.title}</span>
+                                  <span className="text-muted-foreground shrink-0 text-[10px]">
+                                    {item.at}
+                                  </span>
+                                </span>
+                              </Link>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        )
+                      })}
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-
-        <Collapsible defaultOpen className="group/history">
-          <SidebarGroup>
-            <SidebarGroupLabel asChild>
-              <CollapsibleTrigger className="flex w-full items-center gap-2">
-                <HistoryIcon className="size-4" />
-                <span>质检历史</span>
-                <ChevronRightIcon className="ml-auto size-4 transition-transform group-data-[state=open]/history:rotate-90" />
-              </CollapsibleTrigger>
-            </SidebarGroupLabel>
-            <CollapsibleContent>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {history.map((item) => {
-                    const Status = statusIcon[item.status]
-                    return (
-                      <SidebarMenuItem key={item.id}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={pathname === `/sop-checks/${item.id}`}
-                          tooltip={`${item.at} · ${item.title}`}
-                        >
-                          <Link to={`/sop-checks/${item.id}`}>
-                            <Status.icon className={Status.className} />
-                            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                              <span className="truncate">{item.title}</span>
-                              <span className="text-muted-foreground shrink-0 text-[10px]">
-                                {item.at}
-                              </span>
-                            </span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    )
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </CollapsibleContent>
-          </SidebarGroup>
-        </Collapsible>
       </SidebarContent>
 
       <SidebarFooter>
