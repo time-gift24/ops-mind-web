@@ -7,10 +7,10 @@ import { TooltipProvider } from "~/components/ui/tooltip"
 export default function AppLayout() {
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarProvider>
+      <SidebarProvider className="h-svh overflow-hidden">
         <AppSidebar />
         <SidebarInset>
-          <div className="flex flex-1 flex-col gap-4 p-6">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
             <Outlet />
           </div>
         </SidebarInset>

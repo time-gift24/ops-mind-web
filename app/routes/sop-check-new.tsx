@@ -177,18 +177,18 @@ export default function SopCheckNew() {
   const inChat = threadId !== null
 
   return (
-    <div className="relative flex flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <AnimatePresence mode="wait">
         {inChat ? (
           <motion.div
             key="chat"
-            className="relative flex flex-1 flex-col"
+            className="relative flex min-h-0 flex-1 flex-col"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
           >
-            <Conversation>
+            <Conversation className="min-h-0">
               <ConversationContent className="mx-auto w-full max-w-3xl px-4 pt-20 pb-44">
                 {messages.map((m, i) => (
                   <motion.div
