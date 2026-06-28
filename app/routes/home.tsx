@@ -11,21 +11,21 @@ import {
 
 const stats = [
   {
-    label: "Active servers",
+    label: "在线服务器",
     value: "128",
-    delta: "+4 since yesterday",
+    delta: "较昨日 +4",
     icon: ServerIcon,
   },
   {
-    label: "Open incidents",
+    label: "未解决事件",
     value: "3",
-    delta: "1 critical",
+    delta: "1 个严重",
     icon: ShieldAlertIcon,
   },
   {
-    label: "Healthy services",
+    label: "健康服务占比",
     value: "97.4%",
-    delta: "rolling 24h",
+    delta: "过去 24 小时",
     icon: ActivityIcon,
   },
 ]
@@ -35,11 +35,11 @@ export default function Home() {
     <>
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold">Dashboard</h1>
-          <Badge variant="secondary">preview</Badge>
+          <h1 className="text-xl font-semibold">仪表盘</h1>
+          <Badge variant="secondary">预览</Badge>
         </div>
         <p className="text-muted-foreground text-sm">
-          Welcome back. Here is the current state of your infrastructure.
+          欢迎回来，以下是当前基础设施的运行状态。
         </p>
       </div>
 

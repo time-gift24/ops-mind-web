@@ -24,14 +24,14 @@ import {
 } from "~/components/ui/sidebar"
 
 const overview = [
-  { title: "Dashboard", to: "/", icon: LayoutDashboardIcon },
-  { title: "Conversations", to: "/conversations", icon: MessagesSquareIcon },
+  { title: "仪表盘", to: "/", icon: LayoutDashboardIcon },
+  { title: "会话", to: "/conversations", icon: MessagesSquareIcon },
 ]
 
 const operations = [
-  { title: "Servers", to: "/servers", icon: ServerIcon },
-  { title: "Logs", to: "/logs", icon: ScrollTextIcon },
-  { title: "Runbooks", to: "/runbooks", icon: TerminalIcon },
+  { title: "服务器", to: "/servers", icon: ServerIcon },
+  { title: "日志", to: "/logs", icon: ScrollTextIcon },
+  { title: "运维手册", to: "/runbooks", icon: TerminalIcon },
 ]
 
 export function AppSidebar() {
@@ -59,7 +59,7 @@ export function AppSidebar() {
                   <div className="flex flex-col gap-0.5 leading-none">
                     <span className="font-semibold">ops-mind</span>
                     <span className="text-muted-foreground text-xs">
-                      AI operations console
+                      AI 运维助手
                     </span>
                   </div>
                 </Link>
@@ -79,7 +79,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Overview</SidebarGroupLabel>
+          <SidebarGroupLabel>概览</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {overview.map((item) => (
@@ -101,7 +101,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Operations</SidebarGroupLabel>
+          <SidebarGroupLabel>运维</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {operations.map((item) => (
@@ -126,10 +126,10 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Settings">
+            <SidebarMenuButton asChild tooltip="设置">
               <Link to="/settings">
                 <SettingsIcon />
-                <span>Settings</span>
+                <span>设置</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
