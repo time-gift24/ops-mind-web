@@ -1,33 +1,28 @@
 import { AnimatePresence, motion } from "motion/react"
 import {
+  BotIcon,
   CheckIcon,
+  ClipboardListIcon,
   DownloadIcon,
   LinkIcon,
+  ListChecksIcon,
   LoaderIcon,
   PlayCircleIcon,
   RotateCcwIcon,
+  SendIcon,
+  WrenchIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { cjk } from "@streamdown/cjk"
+import { code } from "@streamdown/code"
+import { math } from "@streamdown/math"
+import { mermaid } from "@streamdown/mermaid"
+import { Streamdown } from "streamdown"
 
 import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "~/components/ai-elements/conversation"
-import {
-  Message,
-  MessageContent,
-  MessageResponse,
-} from "~/components/ai-elements/message"
-import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
-  PromptInputProvider,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  type PromptInputMessage,
-} from "~/components/ai-elements/prompt-input"
+  type StreamEnvelope,
+  readSseStream,
+} from "~/lib/sse-stream"
 import { Button } from "~/components/ui/button"
 import { Input } from "~/components/ui/input"
 import {
@@ -44,8 +39,23 @@ import {
 } from "~/components/ui/tooltip"
 
 type Env = "production" | "staging" | "dev"
-type ChatMessage = { id: string; role: "user" | "assistant"; text: string }
+type Role = "user" | "assistant"
 type Status = "idle" | "dispatching" | "streaming" | "done" | "error"
+
+type StructuredEvent = {
+  id: string
+  type: string
+  content: string
+  data: unknown
+}
+
+type ChatMessage = {
+  id: string
+  role: Role
+  text: string
+  reasoning?: string
+  events: StructuredEvent[]
+}
 
 const ENV_LABEL: Record<Env, string> = {
   production: "生产",
@@ -53,34 +63,61 @@ const ENV_LABEL: Record<Env, string> = {
   dev: "测试",
 }
 
-async function dispatchSopCheck(input: {
-  env: Env
-  sopId: string
-}): Promise<{ thread_id: string }> {
-  const res = await fetch("/v1/apis/sop", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ env: input.env, sop_id: input.sopId }),
-  })
-  if (!res.ok) throw new Error(`下发失败: HTTP ${res.status}`)
-  return res.json()
+const streamdownPlugins = { cjk, code, math, mermaid }
+
+function createUserMessage(text: string): ChatMessage {
+  return {
+    id: crypto.randomUUID(),
+    role: "user",
+    text,
+    events: [],
+  }
 }
 
-// 追问：POST 用户输入到既有 thread；后端会把新的助手回复推回到同一 SSE 流。
-// TODO(backend-pending): 接入真实接口后保留此处签名即可。
-async function dispatchFollowup(input: {
-  threadId: string
-  text: string
-}): Promise<void> {
-  const res = await fetch(
-    `/v1/apis/sop/${encodeURIComponent(input.threadId)}/followup`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input.text }),
-    },
+function createAssistantMessage(): ChatMessage {
+  return {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    text: "",
+    reasoning: "",
+    events: [],
+  }
+}
+
+function messagesForApi(messages: ChatMessage[]) {
+  return messages
+    .filter((message) => message.text.trim())
+    .map((message) => ({
+      role: message.role,
+      content: message.text,
+    }))
+}
+
+function getErrorMessage(envelope: StreamEnvelope) {
+  const content = envelope.payload.content
+  if (typeof content === "string" && content.trim()) return content
+  return "流式响应出错"
+}
+
+function isStructuredEvent(envelope: StreamEnvelope) {
+  return (
+    envelope.event_type === "tool_call" ||
+    envelope.event_type === "task" ||
+    envelope.event_type === "plan" ||
+    envelope.event_type === "sub_agent"
   )
-  if (!res.ok) throw new Error(`追问失败: HTTP ${res.status}`)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback
+}
+
+function asRecordArray(value: unknown) {
+  return Array.isArray(value) ? value.filter(isRecord) : []
 }
 
 export default function SopCheckNew() {
@@ -90,107 +127,196 @@ export default function SopCheckNew() {
   const [error, setError] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [followupText, setFollowupText] = useState("")
   const [copied, setCopied] = useState(false)
-  const esRef = useRef<EventSource | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  const closeStream = useCallback(() => {
-    esRef.current?.close()
-    esRef.current = null
+  const abortStream = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
   }, [])
 
-  useEffect(() => closeStream, [closeStream])
+  useEffect(() => abortStream, [abortStream])
 
-  const openStream = useCallback((tid: string) => {
-    closeStream()
-    const es = new EventSource(
-      `/v1/apis/sse/${encodeURIComponent(tid)}`,
-    )
-    esRef.current = es
+  useEffect(() => {
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    })
+  }, [messages, status])
 
-    const assistantId = { current: null as string | null }
-
-    es.addEventListener("message", (ev) => {
-      let payload: { type?: string; role?: string; text?: string; delta?: string } = {}
-      try {
-        payload = JSON.parse(ev.data)
-      } catch {
-        payload = { delta: ev.data }
-      }
-
-      const role: "user" | "assistant" =
-        payload.role === "user" ? "user" : "assistant"
-      const chunk = payload.delta ?? payload.text ?? ""
-      if (!chunk) return
-
-      // Decide id outside the updater so React's potential double-invocation
-      // in dev never produces inconsistent state from a closure mutation.
-      let id = role === "assistant" ? assistantId.current : null
-      if (!id) {
-        id = crypto.randomUUID()
-        if (role === "assistant") assistantId.current = id
-      }
-      const targetId = id
-
-      setMessages((prev) => {
-        const idx = prev.findIndex((m) => m.id === targetId)
-        if (idx >= 0) {
-          const next = prev.slice()
-          next[idx] = { ...next[idx], text: next[idx].text + chunk }
-          return next
+  const applyEnvelope = useCallback((envelope: StreamEnvelope) => {
+    setMessages((prev) => {
+      let next = prev
+      let assistant: ChatMessage | undefined
+      for (let index = next.length - 1; index >= 0; index -= 1) {
+        if (next[index]?.role === "assistant") {
+          assistant = next[index]
+          break
         }
-        return [...prev, { id: targetId, role, text: chunk }]
-      })
+      }
+
+      const ensureAssistant = () => {
+        if (assistant) return assistant
+        const created = createAssistantMessage()
+        next = [...next, created]
+        assistant = created
+        return created
+      }
+
+      if (envelope.event_type === "message_start") {
+        return [...next, createAssistantMessage()]
+      }
+
+      if (envelope.event_type === "text_delta") {
+        const delta = envelope.payload.delta ?? ""
+        if (!delta) return next
+        const target = ensureAssistant()
+        return next.map((message) =>
+          message.id === target.id
+            ? { ...message, text: message.text + delta }
+            : message,
+        )
+      }
+
+      if (envelope.event_type === "reasoning_delta") {
+        const delta = envelope.payload.delta ?? ""
+        if (!delta) return next
+        const target = ensureAssistant()
+        return next.map((message) =>
+          message.id === target.id
+            ? { ...message, reasoning: `${message.reasoning ?? ""}${delta}` }
+            : message,
+        )
+      }
+
+      if (isStructuredEvent(envelope)) {
+        const target = ensureAssistant()
+        const event: StructuredEvent = {
+          id: `${envelope.event_type}-${envelope.seq}`,
+          type: envelope.event_type,
+          content:
+            typeof envelope.payload.content === "string"
+              ? envelope.payload.content
+              : "",
+          data: envelope.payload.data,
+        }
+        return next.map((message) =>
+          message.id === target.id
+            ? { ...message, events: [...message.events, event] }
+            : message,
+        )
+      }
+
+      return next
     })
 
-    es.addEventListener("done", () => {
+    if (envelope.event_type === "error") {
+      setStatus("error")
+      setError(getErrorMessage(envelope))
+    }
+
+    if (envelope.event_type === "finish") {
       setStatus("done")
-      closeStream()
-    })
+      abortRef.current = null
+    }
+  }, [])
 
-    es.addEventListener("error", () => {
-      // EventSource fires "error" when the server closes the stream after
-      // sending "done"; ignore unless we never reached the done state.
-      if (es.readyState === EventSource.CLOSED) return
-      setStatus((s) => (s === "done" ? s : "error"))
-      setError((e) => e ?? "流连接中断")
-      closeStream()
-    })
-  }, [closeStream])
+  const runStream = useCallback(
+    async (url: string, body: unknown) => {
+      abortStream()
+      const controller = new AbortController()
+      abortRef.current = controller
+      setStatus("streaming")
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault()
-      if (!sopId.trim() || status === "dispatching" || status === "streaming")
-        return
-      setError(null)
-      setStatus("dispatching")
       try {
-        const { thread_id } = await dispatchSopCheck({ env, sopId: sopId.trim() })
-        setMessages([
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            text: `对 ${ENV_LABEL[env]} 环境执行 SOP ${sopId.trim()} 的质检。`,
-          },
-        ])
-        setThreadId(thread_id)
-        setStatus("streaming")
-        openStream(thread_id)
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error(`流请求失败: HTTP ${response.status}`)
+        }
+
+        await readSseStream(response.body, applyEnvelope)
       } catch (err) {
-        setStatus("idle")
-        setError(err instanceof Error ? err.message : "下发失败")
+        if (controller.signal.aborted) return
+        setStatus("error")
+        setError(err instanceof Error ? err.message : "流连接中断")
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null
+        }
       }
     },
-    [env, sopId, status, openStream],
+    [abortStream, applyEnvelope],
+  )
+
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const trimmedSopId = sopId.trim()
+      if (!trimmedSopId || status === "dispatching" || status === "streaming")
+        return
+
+      const nextThreadId = crypto.randomUUID()
+      const userMessage = createUserMessage(
+        `对 ${ENV_LABEL[env]} 环境执行 SOP ${trimmedSopId} 的质检。`,
+      )
+
+      setError(null)
+      setThreadId(nextThreadId)
+      setMessages([userMessage])
+      setStatus("dispatching")
+
+      await runStream("/v1/apis/sop/stream", {
+        thread_id: nextThreadId,
+        env,
+        sop_id: trimmedSopId,
+      })
+    },
+    [env, runStream, sopId, status],
+  )
+
+  const handleFollowup = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const text = followupText.trim()
+      if (
+        !text ||
+        !threadId ||
+        status === "streaming" ||
+        status === "dispatching"
+      )
+        return
+
+      const userMessage = createUserMessage(text)
+      const nextMessages = [...messages, userMessage]
+      setMessages(nextMessages)
+      setFollowupText("")
+      setError(null)
+      setStatus("dispatching")
+
+      await runStream("/v1/apis/chat/stream", {
+        thread_id: threadId,
+        messages: messagesForApi(nextMessages),
+      })
+    },
+    [followupText, messages, runStream, status, threadId],
   )
 
   const handleRestart = useCallback(() => {
-    closeStream()
+    abortStream()
     setStatus("idle")
     setMessages([])
     setThreadId(null)
     setError(null)
-  }, [closeStream])
+    setFollowupText("")
+  }, [abortStream])
 
   const handleExport = useCallback(() => {
     if (messages.length === 0) return
@@ -204,9 +330,16 @@ export default function SopCheckNew() {
       ``,
       `---`,
       ``,
-      ...messages.map(
-        (m) => `**${m.role === "user" ? "用户" : "助手"}**\n\n${m.text}\n`,
-      ),
+      ...messages.map((message) => {
+        const title = message.role === "user" ? "用户" : "助手"
+        const reasoning = message.reasoning?.trim()
+          ? `\n\n<reasoning>\n${message.reasoning}\n</reasoning>`
+          : ""
+        const events = message.events.length
+          ? `\n\n<events>\n${JSON.stringify(message.events, null, 2)}\n</events>`
+          : ""
+        return `**${title}**\n\n${message.text}${reasoning}${events}\n`
+      }),
     ]
     const blob = new Blob([lines.join("\n")], {
       type: "text/markdown;charset=utf-8",
@@ -219,7 +352,7 @@ export default function SopCheckNew() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }, [env, sopId, threadId, messages])
+  }, [env, messages, sopId, threadId])
 
   const handleCopyThread = useCallback(async () => {
     if (!threadId) return
@@ -231,35 +364,6 @@ export default function SopCheckNew() {
       setError("复制失败，请手动复制")
     }
   }, [threadId])
-
-  const handleFollowup = useCallback(
-    async (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      const text = message.text.trim()
-      if (
-        !text ||
-        !threadId ||
-        status === "streaming" ||
-        status === "dispatching"
-      )
-        return
-      setError(null)
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "user", text },
-      ])
-      setStatus("dispatching")
-      try {
-        await dispatchFollowup({ threadId, text })
-        setStatus("streaming")
-        openStream(threadId)
-      } catch (err) {
-        setStatus("error")
-        setError(err instanceof Error ? err.message : "追问失败")
-      }
-    },
-    [threadId, status, openStream],
-  )
 
   const inChat = threadId !== null
 
@@ -275,24 +379,25 @@ export default function SopCheckNew() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
           >
-            <Conversation className="min-h-0">
-              <ConversationContent className="mx-auto w-full max-w-3xl px-4 pt-20 pb-44">
-                {messages.map((m, i) => (
+            <div
+              ref={scrollRef}
+              className="min-h-0 flex-1 overflow-y-auto"
+              role="log"
+              aria-live="polite"
+            >
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 pt-20 pb-44">
+                {messages.map((message, index) => (
                   <motion.div
-                    key={m.id}
+                    key={message.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{
                       duration: 0.3,
-                      delay: 0.15 + i * 0.05,
+                      delay: Math.min(0.15 + index * 0.04, 0.35),
                       ease: "easeOut",
                     }}
                   >
-                    <Message from={m.role}>
-                      <MessageContent>
-                        <MessageResponse>{m.text}</MessageResponse>
-                      </MessageContent>
-                    </Message>
+                    <ChatBubble message={message} />
                   </motion.div>
                 ))}
                 {status === "streaming" && (
@@ -304,9 +409,8 @@ export default function SopCheckNew() {
                 {error ? (
                   <div className="text-destructive text-sm">{error}</div>
                 ) : null}
-              </ConversationContent>
-              <ConversationScrollButton className="bottom-36" />
-            </Conversation>
+              </div>
+            </div>
 
             <motion.div
               className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center px-4 pt-4"
@@ -325,9 +429,7 @@ export default function SopCheckNew() {
                   onRestart={handleRestart}
                   onExport={handleExport}
                   onCopyThread={handleCopyThread}
-                  canExport={
-                    status !== "streaming" && messages.length > 0
-                  }
+                  canExport={status !== "streaming" && messages.length > 0}
                 />
               </div>
             </motion.div>
@@ -342,35 +444,52 @@ export default function SopCheckNew() {
                 aria-hidden
                 className="from-background pointer-events-none -mb-2 h-12 w-full max-w-3xl bg-gradient-to-t to-transparent"
               />
-              <div className="pointer-events-auto bg-background/90 supports-[backdrop-filter]:bg-background/75 w-full max-w-3xl rounded-2xl border shadow-lg backdrop-blur-xl">
-                <PromptInputProvider>
-                  <PromptInput
-                    onSubmit={handleFollowup}
-                    className="bg-transparent"
+              <form
+                onSubmit={handleFollowup}
+                className="pointer-events-auto bg-background/90 supports-[backdrop-filter]:bg-background/75 flex w-full max-w-3xl flex-col gap-2 rounded-2xl border p-3 shadow-lg backdrop-blur-xl"
+              >
+                <textarea
+                  id="sop-followup"
+                  name="followup"
+                  aria-label="追问内容"
+                  value={followupText}
+                  onChange={(event) => setFollowupText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault()
+                      event.currentTarget.form?.requestSubmit()
+                    }
+                  }}
+                  placeholder={
+                    status === "streaming"
+                      ? "等待当前回复完成…"
+                      : "继续追问，例如：进一步分析受影响的下游服务"
+                  }
+                  disabled={status === "streaming" || status === "dispatching"}
+                  className="placeholder:text-muted-foreground min-h-20 resize-none bg-transparent px-1 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground text-xs">
+                    {status === "streaming"
+                      ? "AI 正在分析，稍后可继续追问"
+                      : "Enter 发送 · Shift+Enter 换行"}
+                  </span>
+                  <Button
+                    type="submit"
+                    size="icon"
+                    name="send_followup"
+                    disabled={
+                      !followupText.trim() ||
+                      status === "streaming" ||
+                      status === "dispatching"
+                    }
+                    aria-label="发送追问"
+                    className="size-9 rounded-full"
                   >
-                    <PromptInputBody>
-                      <PromptInputTextarea
-                        placeholder={
-                          status === "streaming"
-                            ? "等待当前回复完成…"
-                            : "继续追问，例如：进一步分析受影响的下游服务"
-                        }
-                        disabled={status === "streaming" || status === "dispatching"}
-                      />
-                    </PromptInputBody>
-                    <PromptInputFooter>
-                      <span className="text-muted-foreground text-xs">
-                        {status === "streaming"
-                          ? "AI 正在分析，稍后可继续追问"
-                          : "Enter 发送 · Shift+Enter 换行"}
-                      </span>
-                      <PromptInputSubmit
-                        disabled={status === "streaming" || status === "dispatching"}
-                      />
-                    </PromptInputFooter>
-                  </PromptInput>
-                </PromptInputProvider>
-              </div>
+                    <SendIcon className="size-4" />
+                  </Button>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         ) : (
@@ -395,8 +514,16 @@ export default function SopCheckNew() {
                 onSubmit={handleSubmit}
                 className="bg-muted/60 supports-[backdrop-filter]:bg-muted/40 flex w-full flex-col gap-2 rounded-full p-1.5 backdrop-blur-xl sm:flex-row sm:items-center"
               >
-                <Select value={env} onValueChange={(v) => setEnv(v as Env)}>
-                  <SelectTrigger className="h-11 w-full rounded-full border-none bg-transparent text-sm shadow-none sm:w-32">
+                <Select
+                  name="env"
+                  value={env}
+                  onValueChange={(value) => setEnv(value as Env)}
+                >
+                  <SelectTrigger
+                    id="sop-env"
+                    aria-label="选择环境"
+                    className="h-11 w-full rounded-full border-none bg-transparent text-sm shadow-none sm:w-32"
+                  >
                     <SelectValue placeholder="环境" />
                   </SelectTrigger>
                   <SelectContent>
@@ -406,14 +533,18 @@ export default function SopCheckNew() {
                   </SelectContent>
                 </Select>
                 <Input
+                  id="sop-id"
+                  name="sop_id"
+                  aria-label="SOP 单号"
                   placeholder="SOP 单号，如 SOP-20260628-001"
                   value={sopId}
-                  onChange={(e) => setSopId(e.target.value)}
+                  onChange={(event) => setSopId(event.target.value)}
                   className="h-11 flex-1 border-none bg-transparent text-sm font-mono shadow-none focus-visible:ring-0"
                   autoFocus
                 />
                 <Button
                   type="submit"
+                  name="start_sop_check"
                   disabled={!sopId.trim() || status === "dispatching"}
                   className="h-11 gap-2 rounded-full sm:w-32"
                 >
@@ -435,6 +566,237 @@ export default function SopCheckNew() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+function ChatBubble({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user"
+
+  return (
+    <div
+      className={
+        isUser
+          ? "ml-auto flex w-full max-w-[88%] justify-end"
+          : "flex w-full max-w-[95%] justify-start"
+      }
+    >
+      <div
+        className={
+          isUser
+            ? "bg-secondary text-foreground rounded-lg px-4 py-3 text-sm"
+            : "text-foreground min-w-0 text-sm"
+        }
+      >
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{message.text}</p>
+        ) : (
+          <div className="space-y-3">
+            {message.events.length > 0 ? (
+              <StructuredEvents events={message.events} />
+            ) : null}
+            {message.text ? (
+              <Streamdown plugins={streamdownPlugins}>{message.text}</Streamdown>
+            ) : message.events.length === 0 ? (
+              <span className="text-muted-foreground inline-flex items-center gap-2">
+                <LoaderIcon className="size-3 animate-spin" />
+                准备回复…
+              </span>
+            ) : null}
+            {message.reasoning?.trim() ? (
+              <details className="border-border/70 text-muted-foreground rounded-md border px-3 py-2 text-xs">
+                <summary className="cursor-pointer text-foreground">
+                  推理过程
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap font-sans">
+                  {message.reasoning}
+                </pre>
+              </details>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StructuredEvents({ events }: { events: StructuredEvent[] }) {
+  return (
+    <div className="space-y-2">
+      {events.map((event) => (
+        <StructuredEventCard event={event} key={event.id} />
+      ))}
+    </div>
+  )
+}
+
+function StructuredEventCard({ event }: { event: StructuredEvent }) {
+  if (event.type === "plan") return <PlanEventCard event={event} />
+  if (event.type === "sub_agent") return <SubAgentEventCard event={event} />
+  if (event.type === "task") return <TaskEventCard event={event} />
+  if (event.type === "tool_call") return <ToolCallEventCard event={event} />
+  return <GenericStructuredEventCard event={event} />
+}
+
+function StructuredCard({
+  children,
+  icon,
+  title,
+}: {
+  children: React.ReactNode
+  icon: React.ReactNode
+  title: string
+}) {
+  return (
+    <section className="border-border/70 bg-muted/30 rounded-md border px-3 py-2 text-xs">
+      <div className="text-foreground mb-2 flex items-center gap-2 font-medium">
+        {icon}
+        <span>{title}</span>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function StatusPill({ status }: { status: string }) {
+  const normalized = status.toLowerCase()
+  const tone =
+    normalized === "finish" || normalized === "done" || normalized === "completed"
+      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+      : normalized === "running" || normalized === "start"
+        ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+        : normalized === "error" || normalized === "failed"
+          ? "bg-destructive/10 text-destructive"
+          : "bg-muted text-muted-foreground"
+
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[11px] ${tone}`}>
+      {status || "pending"}
+    </span>
+  )
+}
+
+function PlanEventCard({ event }: { event: StructuredEvent }) {
+  const data = isRecord(event.data) ? event.data : {}
+  const steps = asRecordArray(data.steps)
+
+  return (
+    <StructuredCard
+      icon={<ListChecksIcon className="size-3.5" />}
+      title={asString(data.title, "计划")}
+    >
+      {event.content ? (
+        <p className="text-muted-foreground mb-2">{event.content}</p>
+      ) : null}
+      <ol className="space-y-1.5">
+        {steps.map((step, index) => (
+          <li
+            className="flex items-start gap-2 rounded-md bg-background/50 px-2 py-1.5"
+            key={asString(step.step_id, `step-${index}`)}
+          >
+            <span className="text-muted-foreground mt-0.5 font-mono">
+              {index + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-foreground font-medium">
+                  {asString(step.title, "未命名步骤")}
+                </span>
+                <StatusPill status={asString(step.status, "pending")} />
+              </div>
+              {asString(step.description) ? (
+                <p className="text-muted-foreground mt-0.5">
+                  {asString(step.description)}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </StructuredCard>
+  )
+}
+
+function SubAgentEventCard({ event }: { event: StructuredEvent }) {
+  const data = isRecord(event.data) ? event.data : {}
+
+  return (
+    <StructuredCard
+      icon={<BotIcon className="size-3.5" />}
+      title={`子代理 · ${asString(data.agent_name, "agent")}`}
+    >
+      <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+        <span>
+          节点：<span className="text-foreground">{asString(data.current_node, "-")}</span>
+        </span>
+        {event.content ? <span>{event.content}</span> : null}
+      </div>
+    </StructuredCard>
+  )
+}
+
+function TaskEventCard({ event }: { event: StructuredEvent }) {
+  const data = isRecord(event.data) ? event.data : {}
+  const items = Array.isArray(data.items) ? data.items.map(String) : []
+
+  return (
+    <StructuredCard
+      icon={<ClipboardListIcon className="size-3.5" />}
+      title={`任务 · ${asString(data.title, "未命名任务")}`}
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <StatusPill status={asString(data.status, "running")} />
+        {event.content ? (
+          <span className="text-muted-foreground">{event.content}</span>
+        ) : null}
+      </div>
+      {items.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {items.map((item) => (
+            <span
+              className="bg-background text-muted-foreground rounded-full px-2 py-0.5"
+              key={item}
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </StructuredCard>
+  )
+}
+
+function ToolCallEventCard({ event }: { event: StructuredEvent }) {
+  const data = isRecord(event.data) ? event.data : {}
+
+  return (
+    <StructuredCard
+      icon={<WrenchIcon className="size-3.5" />}
+      title={`工具调用 · ${asString(data.tool_name, "tool")}`}
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <StatusPill status={asString(data.status, "finish")} />
+        {event.content ? (
+          <span className="text-muted-foreground">{event.content}</span>
+        ) : null}
+      </div>
+      <pre className="text-muted-foreground max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-background/60 p-2">
+        {JSON.stringify(data.result ?? data.arguments ?? data, null, 2)}
+      </pre>
+    </StructuredCard>
+  )
+}
+
+function GenericStructuredEventCard({ event }: { event: StructuredEvent }) {
+  return (
+    <details className="border-border/70 rounded-md border px-3 py-2 text-xs">
+      <summary className="cursor-pointer font-medium">
+        {event.type}
+        {event.content ? ` · ${event.content}` : ""}
+      </summary>
+      <pre className="text-muted-foreground mt-2 overflow-x-auto whitespace-pre-wrap">
+        {JSON.stringify(event.data, null, 2)}
+      </pre>
+    </details>
   )
 }
 
@@ -462,18 +824,17 @@ function DispatchedHeader({
   canExport: boolean
 }) {
   return (
-    <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 pl-3 pr-1 text-sm">
+    <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 pr-1 pl-3 text-sm">
       <h1 className="text-foreground font-medium">SOP 质检</h1>
       <span aria-hidden className="bg-border h-4 w-px" />
       <span>
         环境 · <span className="text-foreground">{ENV_LABEL[env]}</span>
       </span>
       <span className="min-w-0">
-        SOP ·{" "}
-        <span className="text-foreground truncate font-mono">{sopId}</span>
+        SOP · <span className="text-foreground truncate font-mono">{sopId}</span>
       </span>
       {threadId ? (
-        <span className="font-mono hidden lg:inline">
+        <span className="hidden font-mono lg:inline">
           thread · {threadId.slice(0, 8)}
         </span>
       ) : null}
