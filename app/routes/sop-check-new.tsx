@@ -2,17 +2,28 @@ import { AnimatePresence, motion } from "motion/react"
 import {
   BotIcon,
   CheckIcon,
+  ChevronRightIcon,
   ClipboardListIcon,
   DownloadIcon,
   LinkIcon,
   ListChecksIcon,
   LoaderIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   PlayCircleIcon,
   RotateCcwIcon,
   SendIcon,
+  SparklesIcon,
   WrenchIcon,
 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react"
 import { useRevalidator } from "react-router"
 import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
@@ -27,6 +38,11 @@ import {
   readSseStream,
 } from "~/lib/sse-stream"
 import { Button } from "~/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "~/components/ui/collapsible"
 import { Input } from "~/components/ui/input"
 import {
   Select,
@@ -132,9 +148,12 @@ export default function SopCheckNew() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [followupText, setFollowupText] = useState("")
   const [copied, setCopied] = useState(false)
+  const [railOpen, setRailOpen] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const revalidator = useRevalidator()
+
+  const toggleRail = useCallback(() => setRailOpen((open) => !open), [])
 
   const abortStream = useCallback(() => {
     abortRef.current?.abort()
@@ -149,6 +168,13 @@ export default function SopCheckNew() {
       behavior: "smooth",
     })
   }, [messages, status])
+
+  const latestAssistant = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "assistant") return messages[index]
+    }
+    return null
+  }, [messages])
 
   const applyEnvelope = useCallback((envelope: StreamEnvelope) => {
     setMessages((prev) => {
@@ -394,6 +420,7 @@ export default function SopCheckNew() {
   }, [threadId])
 
   const inChat = threadId !== null
+  const railPadding = railOpen ? "lg:pr-[336px] xl:pr-[376px]" : ""
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -409,7 +436,7 @@ export default function SopCheckNew() {
           >
             <div
               ref={scrollRef}
-              className="min-h-0 flex-1 overflow-y-auto"
+              className={`min-h-0 flex-1 overflow-y-auto ${railPadding}`}
               role="log"
               aria-live="polite"
             >
@@ -441,7 +468,7 @@ export default function SopCheckNew() {
             </div>
 
             <motion.div
-              className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center px-4 pt-4"
+              className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center px-4 pt-4 ${railPadding}`}
               initial={{ opacity: 0, y: -12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.1, ease: "easeOut" }}
@@ -458,12 +485,14 @@ export default function SopCheckNew() {
                   onExport={handleExport}
                   onCopyThread={handleCopyThread}
                   canExport={status !== "streaming" && messages.length > 0}
+                  railOpen={railOpen}
+                  onToggleRail={toggleRail}
                 />
               </div>
             </motion.div>
 
             <motion.div
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center px-4 pb-4"
+              className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center px-4 pb-4 ${railPadding}`}
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.25, ease: "easeOut" }}
@@ -520,6 +549,37 @@ export default function SopCheckNew() {
                 </div>
               </form>
             </motion.div>
+
+            {railOpen ? (
+              <motion.aside
+                key="rail"
+                className="bg-background/85 supports-[backdrop-filter]:bg-background/65 pointer-events-auto absolute top-4 right-4 bottom-44 z-10 hidden w-[320px] flex-col overflow-hidden rounded-2xl border shadow-lg backdrop-blur-xl lg:flex xl:w-[360px]"
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 16 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+              >
+                <TaskProgressRail
+                  message={latestAssistant}
+                  status={status}
+                  onClose={toggleRail}
+                />
+              </motion.aside>
+            ) : (
+              <motion.button
+                key="rail-launcher"
+                type="button"
+                onClick={toggleRail}
+                aria-label="显示任务进展"
+                className="bg-background/85 supports-[backdrop-filter]:bg-background/65 text-muted-foreground hover:text-foreground hover:bg-background pointer-events-auto absolute top-4 right-4 z-10 hidden items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs shadow-sm backdrop-blur-xl transition-colors lg:inline-flex"
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+              >
+                <PanelRightOpenIcon className="size-3.5" />
+                <span>任务进展</span>
+              </motion.button>
+            )}
           </motion.div>
         ) : (
           <motion.div
@@ -658,10 +718,248 @@ function StructuredEvents({ events }: { events: StructuredEvent[] }) {
   )
 }
 
+function pickRailSnapshot(message: ChatMessage | null) {
+  if (!message) return { plan: null, subAgent: null, tasks: [] as StructuredEvent[] }
+  let plan: StructuredEvent | null = null
+  let subAgent: StructuredEvent | null = null
+  const tasks: StructuredEvent[] = []
+  for (const event of message.events) {
+    if (event.type === "plan") plan = event
+    else if (event.type === "sub_agent") subAgent = event
+    else if (event.type === "task") tasks.push(event)
+  }
+  return { plan, subAgent, tasks: tasks.slice().reverse() }
+}
+
+function TaskProgressRail({
+  message,
+  status,
+  onClose,
+}: {
+  message: ChatMessage | null
+  status: Status
+  onClose: () => void
+}) {
+  const { plan, subAgent, tasks } = pickRailSnapshot(message)
+  const hasAny = plan || subAgent || tasks.length > 0
+  const isLive = status === "streaming" || status === "dispatching"
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 border-b px-3 py-2.5 text-sm">
+        <SparklesIcon className="text-muted-foreground size-4" />
+        <span className="text-foreground font-medium">任务进展</span>
+        {isLive ? (
+          <LoaderIcon className="text-muted-foreground size-3 animate-spin" />
+        ) : status === "done" && hasAny ? (
+          <span className="text-muted-foreground text-xs">已完成</span>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label="隐藏任务进展"
+          className="ml-auto size-7 rounded-full"
+        >
+          <PanelRightCloseIcon className="size-3.5" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        {hasAny ? (
+          <div className="space-y-2">
+            {plan ? <RailPlanSection event={plan} /> : null}
+            {subAgent ? <RailSubAgentSection event={subAgent} /> : null}
+            {tasks.length > 0 ? <RailTasksSection tasks={tasks} /> : null}
+          </div>
+        ) : (
+          <RailEmptyState status={status} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RailSection({
+  title,
+  icon,
+  meta,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  icon: React.ReactNode
+  meta?: React.ReactNode
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Collapsible defaultOpen={defaultOpen}>
+      <section className="border-border/70 bg-muted/30 overflow-hidden rounded-md border text-xs">
+        <CollapsibleTrigger className="group hover:bg-muted/50 flex w-full items-center gap-2 px-3 py-2 text-left transition-colors">
+          <span className="text-muted-foreground inline-flex shrink-0 items-center">
+            {icon}
+          </span>
+          <span className="text-foreground min-w-0 flex-1 truncate font-medium">
+            {title}
+          </span>
+          {meta}
+          <ChevronRightIcon className="text-muted-foreground size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="border-border/70 border-t px-3 py-2">
+          {children}
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  )
+}
+
+function RailPlanSection({ event }: { event: StructuredEvent }) {
+  const data = isRecord(event.data) ? event.data : {}
+  const steps = asRecordArray(data.steps)
+
+  return (
+    <RailSection
+      title={asString(data.title, "计划")}
+      icon={<ListChecksIcon className="size-3.5" />}
+    >
+      {event.content ? (
+        <p className="text-muted-foreground mb-2">{event.content}</p>
+      ) : null}
+      <ol className="space-y-1.5">
+        {steps.map((step, index) => (
+          <li
+            className="flex items-start gap-2 rounded-md bg-background/60 px-2 py-1.5"
+            key={asString(step.step_id, `step-${index}`)}
+          >
+            <span className="text-muted-foreground mt-0.5 font-mono">
+              {index + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-foreground font-medium">
+                  {asString(step.title, "未命名步骤")}
+                </span>
+                <StatusPill status={asString(step.status, "pending")} />
+              </div>
+              {asString(step.description) ? (
+                <p className="text-muted-foreground mt-0.5">
+                  {asString(step.description)}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </RailSection>
+  )
+}
+
+function RailSubAgentSection({ event }: { event: StructuredEvent }) {
+  const data = isRecord(event.data) ? event.data : {}
+
+  return (
+    <RailSection
+      title={`子代理 · ${asString(data.agent_name, "agent")}`}
+      icon={<BotIcon className="size-3.5" />}
+    >
+      <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+        <span>
+          节点：
+          <span className="text-foreground">
+            {asString(data.current_node, "-")}
+          </span>
+        </span>
+        {event.content ? <span>{event.content}</span> : null}
+      </div>
+    </RailSection>
+  )
+}
+
+function RailTasksSection({ tasks }: { tasks: StructuredEvent[] }) {
+  return (
+    <RailSection
+      title={`子任务 · ${tasks.length}`}
+      icon={<ClipboardListIcon className="size-3.5" />}
+    >
+      <ul className="space-y-1.5">
+        {tasks.map((task) => {
+          const data = isRecord(task.data) ? task.data : {}
+          const items = Array.isArray(data.items) ? data.items.map(String) : []
+          return (
+            <li
+              key={task.id}
+              className="space-y-1 rounded-md bg-background/60 px-2 py-1.5"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-foreground font-medium">
+                  {asString(data.title, "未命名任务")}
+                </span>
+                <StatusPill status={asString(data.status, "running")} />
+              </div>
+              {task.content ? (
+                <p className="text-muted-foreground">{task.content}</p>
+              ) : null}
+              {items.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {items.map((item) => (
+                    <span
+                      className="bg-background text-muted-foreground rounded-full px-2 py-0.5"
+                      key={item}
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </RailSection>
+  )
+}
+
+function RailEmptyState({ status }: { status: Status }) {
+  const live = status === "streaming" || status === "dispatching"
+  return (
+    <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-center text-xs">
+      {live ? (
+        <>
+          <LoaderIcon className="size-4 animate-spin" />
+          <span>正在生成计划…</span>
+        </>
+      ) : (
+        <>
+          <ListChecksIcon className="size-4 opacity-60" />
+          <span>暂无任务进展</span>
+          <span className="text-[11px] opacity-80">
+            发起或继续追问后，AI 的计划与子任务会出现在这里。
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
 function StructuredEventCard({ event }: { event: StructuredEvent }) {
-  if (event.type === "plan") return <PlanEventCard event={event} />
-  if (event.type === "sub_agent") return <SubAgentEventCard event={event} />
-  if (event.type === "task") return <TaskEventCard event={event} />
+  if (event.type === "plan")
+    return (
+      <div className="lg:hidden">
+        <PlanEventCard event={event} />
+      </div>
+    )
+  if (event.type === "sub_agent")
+    return (
+      <div className="lg:hidden">
+        <SubAgentEventCard event={event} />
+      </div>
+    )
+  if (event.type === "task")
+    return (
+      <div className="lg:hidden">
+        <TaskEventCard event={event} />
+      </div>
+    )
   if (event.type === "tool_call") return <ToolCallEventCard event={event} />
   return <GenericStructuredEventCard event={event} />
 }
@@ -796,22 +1094,33 @@ function TaskEventCard({ event }: { event: StructuredEvent }) {
 
 function ToolCallEventCard({ event }: { event: StructuredEvent }) {
   const data = isRecord(event.data) ? event.data : {}
+  const toolName = asString(data.tool_name, "tool")
+  const status = asString(data.status, "finish")
 
   return (
-    <StructuredCard
-      icon={<WrenchIcon className="size-3.5" />}
-      title={`工具调用 · ${asString(data.tool_name, "tool")}`}
-    >
-      <div className="mb-2 flex items-center gap-2">
-        <StatusPill status={asString(data.status, "finish")} />
-        {event.content ? (
-          <span className="text-muted-foreground">{event.content}</span>
-        ) : null}
-      </div>
-      <pre className="text-muted-foreground max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-background/60 p-2">
-        {JSON.stringify(data.result ?? data.arguments ?? data, null, 2)}
-      </pre>
-    </StructuredCard>
+    <Collapsible>
+      <section className="border-border/70 bg-muted/30 overflow-hidden rounded-md border text-xs">
+        <CollapsibleTrigger className="group hover:bg-muted/50 flex w-full items-center gap-2 px-3 py-2 text-left transition-colors">
+          <WrenchIcon className="text-muted-foreground size-3.5 shrink-0" />
+          <span className="text-foreground font-medium">工具调用</span>
+          <span className="text-muted-foreground truncate font-mono">
+            · {toolName}
+          </span>
+          <StatusPill status={status} />
+          {event.content ? (
+            <span className="text-muted-foreground ml-1 hidden truncate sm:inline">
+              {event.content}
+            </span>
+          ) : null}
+          <ChevronRightIcon className="text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="border-border/70 border-t px-3 py-2">
+          <pre className="text-muted-foreground max-h-60 overflow-auto whitespace-pre-wrap rounded-md bg-background/60 p-2">
+            {JSON.stringify(data.result ?? data.arguments ?? data, null, 2)}
+          </pre>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   )
 }
 
@@ -840,6 +1149,8 @@ function DispatchedHeader({
   onExport,
   onCopyThread,
   canExport,
+  railOpen,
+  onToggleRail,
 }: {
   env: Env
   sopId: string
@@ -851,6 +1162,8 @@ function DispatchedHeader({
   onExport: () => void
   onCopyThread: () => void
   canExport: boolean
+  railOpen: boolean
+  onToggleRail: () => void
 }) {
   return (
     <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 pr-1 pl-3 text-sm">
@@ -869,6 +1182,26 @@ function DispatchedHeader({
       ) : null}
       <StatusText status={status} hasError={!!error} />
       <div className="ml-auto flex items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleRail}
+              aria-label={railOpen ? "隐藏任务进展" : "显示任务进展"}
+              className="hidden size-9 rounded-full lg:inline-flex"
+            >
+              {railOpen ? (
+                <PanelRightCloseIcon className="size-4" />
+              ) : (
+                <PanelRightOpenIcon className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {railOpen ? "隐藏任务进展" : "显示任务进展"}
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
