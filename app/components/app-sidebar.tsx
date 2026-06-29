@@ -3,6 +3,7 @@ import {
   CheckCircle2Icon,
   ChevronRightIcon,
   HistoryIcon,
+  LoaderIcon,
   MoonIcon,
   PlayCircleIcon,
   SettingsIcon,
@@ -10,8 +11,8 @@ import {
   XCircleIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { useEffect, useState } from "react"
-import { Link, useLocation } from "react-router"
+import { useEffect, useMemo, useState } from "react"
+import { Link, useLocation, useRouteLoaderData } from "react-router"
 
 import {
   Collapsible,
@@ -35,28 +36,60 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "~/components/ui/sidebar"
+import type { CheckStatus, HistoryItem } from "~/lib/history-types"
+import {
+  reconcileOptimisticHistory,
+  useOptimisticHistory,
+} from "~/lib/optimistic-history"
 
-const statusIcon = {
+const statusIcon: Record<
+  CheckStatus,
+  { icon: typeof CheckCircle2Icon; className: string }
+> = {
   pass: { icon: CheckCircle2Icon, className: "text-emerald-500" },
   warn: { icon: AlertTriangleIcon, className: "text-amber-500" },
   fail: { icon: XCircleIcon, className: "text-red-500" },
-} as const
+  running: { icon: LoaderIcon, className: "text-primary animate-spin" },
+}
 
-const history: Array<{
-  id: string
-  title: string
-  at: string
-  status: keyof typeof statusIcon
-}> = [
-  { id: "c-2406-281432", title: "数据库主从延迟", at: "06-28 14:32", status: "warn" },
-  { id: "c-2406-281015", title: "缓存集群健康", at: "06-28 10:15", status: "pass" },
-  { id: "c-2406-272253", title: "网关 5xx 飙升", at: "06-27 22:53", status: "fail" },
-  { id: "c-2406-271842", title: "日志采集巡检", at: "06-27 18:42", status: "pass" },
-  { id: "c-2406-270900", title: "K8s 节点资源", at: "06-27 09:00", status: "pass" },
-]
+type LayoutLoaderData = { history: HistoryItem[] }
+
+function formatCreatedAt(iso: string) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const dd = String(date.getDate()).padStart(2, "0")
+  const hh = String(date.getHours()).padStart(2, "0")
+  const mi = String(date.getMinutes()).padStart(2, "0")
+  return `${mm}-${dd} ${hh}:${mi}`
+}
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const loaderData = useRouteLoaderData<LayoutLoaderData>("layouts/app-layout")
+  const serverItems = loaderData?.history ?? []
+  const optimisticItems = useOptimisticHistory()
+
+  useEffect(() => {
+    if (serverItems.length === 0) return
+    reconcileOptimisticHistory(new Set(serverItems.map((item) => item.id)))
+  }, [serverItems])
+
+  const items = useMemo(() => {
+    const seen = new Set<string>()
+    const merged: HistoryItem[] = []
+    for (const item of optimisticItems) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+      merged.push(item)
+    }
+    for (const item of serverItems) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+      merged.push(item)
+    }
+    return merged
+  }, [optimisticItems, serverItems])
 
   return (
     <Sidebar collapsible="icon">
@@ -127,27 +160,39 @@ export function AppSidebar() {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <SidebarMenuSub className="mt-1 gap-1.5">
-                      {history.map((item) => {
-                        const Status = statusIcon[item.status]
-                        return (
-                          <SidebarMenuSubItem key={item.id}>
-                            <SidebarMenuSubButton
-                              asChild
-                              isActive={pathname === `/sop-checks/${item.id}`}
-                            >
-                              <Link to={`/sop-checks/${item.id}`}>
-                                <Status.icon className={Status.className} />
-                                <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                                  <span className="truncate">{item.title}</span>
-                                  <span className="text-muted-foreground shrink-0 text-[10px]">
-                                    {item.at}
+                      {items.length === 0 ? (
+                        <SidebarMenuSubItem>
+                          <span className="text-muted-foreground px-2 py-1.5 text-xs">
+                            暂无历史
+                          </span>
+                        </SidebarMenuSubItem>
+                      ) : (
+                        items.map((item) => {
+                          const Status = statusIcon[item.status]
+                          return (
+                            <SidebarMenuSubItem key={item.id}>
+                              <SidebarMenuSubButton
+                                asChild
+                                isActive={
+                                  pathname === `/sop-checks/${item.id}`
+                                }
+                              >
+                                <Link to={`/sop-checks/${item.id}`}>
+                                  <Status.icon className={Status.className} />
+                                  <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                    <span className="truncate">
+                                      {item.title}
+                                    </span>
+                                    <span className="text-muted-foreground shrink-0 text-[10px]">
+                                      {formatCreatedAt(item.created_at)}
+                                    </span>
                                   </span>
-                                </span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        )
-                      })}
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          )
+                        })
+                      )}
                     </SidebarMenuSub>
                   </CollapsibleContent>
                 </SidebarMenuItem>

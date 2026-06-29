@@ -13,12 +13,15 @@ import {
   WrenchIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { useRevalidator } from "react-router"
 import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
 import { Streamdown } from "streamdown"
 
+import type { HistoryItem } from "~/lib/history-types"
+import { addOptimisticHistory } from "~/lib/optimistic-history"
 import {
   type StreamEnvelope,
   readSseStream,
@@ -131,6 +134,7 @@ export default function SopCheckNew() {
   const [copied, setCopied] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const revalidator = useRevalidator()
 
   const abortStream = useCallback(() => {
     abortRef.current?.abort()
@@ -224,7 +228,11 @@ export default function SopCheckNew() {
   }, [])
 
   const runStream = useCallback(
-    async (url: string, body: unknown) => {
+    async (
+      url: string,
+      body: unknown,
+      options?: { onDispatched?: () => void },
+    ) => {
       abortStream()
       const controller = new AbortController()
       abortRef.current = controller
@@ -241,6 +249,8 @@ export default function SopCheckNew() {
         if (!response.ok) {
           throw new Error(`流请求失败: HTTP ${response.status}`)
         }
+
+        options?.onDispatched?.()
 
         await readSseStream(response.body, applyEnvelope)
       } catch (err) {
@@ -273,13 +283,31 @@ export default function SopCheckNew() {
       setMessages([userMessage])
       setStatus("dispatching")
 
-      await runStream("/v1/apis/sop/stream", {
-        thread_id: nextThreadId,
+      const optimisticHistoryItem: HistoryItem = {
+        id: nextThreadId,
+        title: `${ENV_LABEL[env]} · SOP ${trimmedSopId}`,
         env,
         sop_id: trimmedSopId,
-      })
+        status: "running",
+        created_at: new Date().toISOString(),
+      }
+
+      await runStream(
+        "/v1/apis/sop/stream",
+        {
+          thread_id: nextThreadId,
+          env,
+          sop_id: trimmedSopId,
+        },
+        {
+          onDispatched: () => {
+            addOptimisticHistory(optimisticHistoryItem)
+            revalidator.revalidate()
+          },
+        },
+      )
     },
-    [env, runStream, sopId, status],
+    [env, revalidator, runStream, sopId, status],
   )
 
   const handleFollowup = useCallback(
@@ -452,6 +480,7 @@ export default function SopCheckNew() {
                   id="sop-followup"
                   name="followup"
                   aria-label="追问内容"
+                  rows={2}
                   value={followupText}
                   onChange={(event) => setFollowupText(event.target.value)}
                   onKeyDown={(event) => {
@@ -466,7 +495,7 @@ export default function SopCheckNew() {
                       : "继续追问，例如：进一步分析受影响的下游服务"
                   }
                   disabled={status === "streaming" || status === "dispatching"}
-                  className="placeholder:text-muted-foreground min-h-20 resize-none bg-transparent px-1 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  className="placeholder:text-muted-foreground resize-none bg-transparent px-1 text-sm leading-6 outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 />
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground text-xs">
